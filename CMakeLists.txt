@@ -21,7 +21,11 @@ endif()
 
 string(TOLOWER "${CMAKE_BUILD_TYPE}" TYPE_STRING)
 
-if(WIN32)
+if(ANDROID)
+    set(PLATFORM "android")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(PLATFORM "ios")
+elseif(WIN32)
     set(PLATFORM "windows")
 elseif(APPLE)
     set(PLATFORM "macos")
@@ -29,7 +33,20 @@ else()
     set(PLATFORM "linux")
 endif()
 
-set(ARCH "x86_64")
+if(ANDROID)
+    # Godot's own arch names: arm64-v8a -> arm64, armeabi-v7a -> arm32.
+    if(ANDROID_ABI STREQUAL "arm64-v8a")
+        set(ARCH "arm64")
+    elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
+        set(ARCH "arm32")
+    else()
+        set(ARCH "${ANDROID_ABI}")
+    endif()
+elseif(PLATFORM STREQUAL "ios")
+    set(ARCH "arm64")
+else()
+    set(ARCH "x86_64")
+endif()
 
 message(STATUS "Building: ${CMAKE_BUILD_TYPE} on ${PLATFORM} ${ARCH}")
 message(STATUS "GODOT_CPP_PATH: ${GODOT_CPP_PATH}")
@@ -45,35 +62,100 @@ endif()
 # Build godot-cpp as part of this build (no separate SCons pre-build step needed).
 add_subdirectory(${GODOT_CPP_PATH} ${CMAKE_BINARY_DIR}/godot-cpp)
 
-# Build Game-Framework's Core the same way — a real, ordinary static-library
-# dependency (see that repo's own README for why Subsystem/SubsystemManager
-# are plain C++, not GDCLASS types: cross-extension GDExtension class
-# inheritance is unsupported by Godot's ClassDB). This addon is the ONLY
-# GDCLASS-registered bridge into it (SubsystemManagerBridge) — every other
-# Godot gem that wants to define real Subsystem subclasses links against
-# Game-Framework's Core directly too, the same way this one does, not
-# through this addon's Godot-facing surface.
+# Build Game-Framework's Core. Every platform except iOS links the SHARED
+# target and ships it as a real runtime artifact (libgameframework.*, right
+# alongside FoundationGameFramework.* below) — NOT the static target. This
+# matters: GameplayTags/Lexicon/Ogham/every future gem that defines real
+# Subsystem subclasses is a SEPARATE GDExtension .so, and Subsystem/
+# SubsystemManager instances must be shared process-wide (one
+# SubsystemManager::instance() everyone registers with, so the dock sees
+# every gem's subsystems and cross-gem depends_on() ordering works). Static
+# linking would give each .so its own private, disconnected copy of that
+# singleton state — silently wrong, not merely suboptimal. Every consumer
+# gem links against its OWN build of gameframework::shared (for the
+# compile-time import stub) but declares a RUNTIME dependency, via its own
+# .gdextension [dependencies] section, on THIS repo's shipped copy at
+# res://addons/FoundationGameFramework/bin/libgameframework.* — Godot's
+# loader resolves that path once, so every gem's .so ends up linked against
+# the same loaded module. See this repo's README for the full explanation.
+#
+# iOS is the one exception: GDExtensions must be statically linked there
+# (Godot disallows dynamic loading on iOS), so cross-gem Subsystem sharing
+# doesn't apply on iOS the same way — this addon links the STATIC target
+# there instead, same as every other gem does for its own iOS build.
 set(GAMEFRAMEWORK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${GAMEFRAMEWORK_CORE_PATH} ${CMAKE_BINARY_DIR}/gameframework-core)
 
 file(GLOB_RECURSE SOURCES "src/private/*.cpp")
 
-add_library(FoundationGameFramework SHARED ${SOURCES})
+# iOS does not allow dynamically-loaded GDExtensions — Godot requires them
+# statically linked into the exported binary there (unlike every other
+# platform this addon targets). Everywhere else this is an ordinary shared
+# library dropped straight into bin/ per the .gdextension library table.
+if(PLATFORM STREQUAL "ios")
+    add_library(FoundationGameFramework STATIC ${SOURCES})
+else()
+    add_library(FoundationGameFramework SHARED ${SOURCES})
+endif()
 
 target_include_directories(FoundationGameFramework PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/public
 )
 
-target_link_libraries(FoundationGameFramework PRIVATE godot::cpp gameframework::gameframework)
+if(PLATFORM STREQUAL "ios")
+    target_link_libraries(FoundationGameFramework PRIVATE godot::cpp gameframework::gameframework)
+else()
+    target_link_libraries(FoundationGameFramework PRIVATE godot::cpp gameframework::shared)
+endif()
 
 set_target_properties(FoundationGameFramework
     PROPERTIES
     PREFIX ""
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
+    # ARCHIVE_OUTPUT_DIRECTORY is what governs STATIC lib placement (iOS) —
+    # LIBRARY_OUTPUT_DIRECTORY alone only covers SHARED/MODULE targets, so
+    # without this the iOS .a would land wherever the Xcode generator
+    # defaults to instead of bin/.
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
     OUTPUT_NAME "libFoundationGameFramework.${PLATFORM}.${TYPE_STRING}.${ARCH}"
 )
 
-if(NOT WIN32)
+# Without this, CMake bakes an ABSOLUTE build-tree RUNPATH pointing at this
+# machine's build directory (confirmed with readelf — it silently works
+# here and would silently fail on every other machine, CI artifact, or
+# install location, since that exact path only exists on the box that
+# built it). $ORIGIN (Linux/Android) / @loader_path (macOS) makes the
+# shared gameframework runtime resolve relative to wherever this .so
+# itself ends up on disk — same bin/ folder, wherever that is. No RPATH
+# concept on Windows (DLL search order already checks the loading DLL's
+# own directory by default); nothing to set there. iOS is static, moot.
+if(PLATFORM STREQUAL "linux" OR PLATFORM STREQUAL "android")
+    set_target_properties(FoundationGameFramework PROPERTIES
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INSTALL_RPATH "$ORIGIN"
+    )
+elseif(PLATFORM STREQUAL "macos")
+    set_target_properties(FoundationGameFramework PROPERTIES
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INSTALL_RPATH "@loader_path"
+    )
+endif()
+
+if(NOT WIN32 AND NOT PLATFORM STREQUAL "ios")
     target_link_options(FoundationGameFramework PRIVATE "-rdynamic")
+endif()
+
+# Ship the shared gameframework runtime itself as a real artifact in bin/,
+# right alongside FoundationGameFramework.* — this is the canonical copy
+# every other gem's .gdextension [dependencies] section points at (see the
+# big comment above). Not shipped at all on iOS, where everything is static.
+if(NOT PLATFORM STREQUAL "ios")
+    set_target_properties(gameframework_shared
+        PROPERTIES
+        PREFIX ""
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
+        OUTPUT_NAME "libgameframework.${PLATFORM}.${TYPE_STRING}.${ARCH}"
+    )
 endif()

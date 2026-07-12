@@ -12,3 +12,20 @@ linux.release.x86_64 = "res://addons/FoundationGameFramework/bin/libFoundationGa
 
 macos.debug.x86_64   = "res://addons/FoundationGameFramework/bin/libFoundationGameFramework.macos.debug.x86_64.dylib"
 macos.release.x86_64 = "res://addons/FoundationGameFramework/bin/libFoundationGameFramework.macos.release.x86_64.dylib"
+
+android.debug.arm64    = "res://addons/FoundationGameFramework/bin/libFoundationGameFramework.android.debug.arm64.so"
+android.release.arm64  = "res://addons/FoundationGameFramework/bin/libFoundationGameFramework.android.release.arm64.so"
+android.debug.arm32    = "res://addons/FoundationGameFramework/bin/libFoundationGameFramework.android.debug.arm32.so"
+android.release.arm32  = "res://addons/FoundationGameFramework/bin/libFoundationGameFramework.android.release.arm32.so"
+android.debug.x86_64   = "res://addons/FoundationGameFramework/bin/libFoundationGameFramework.android.debug.x86_64.so"
+android.release.x86_64 = "res://addons/FoundationGameFramework/bin/libFoundationGameFramework.android.release.x86_64.so"
+
+; iOS GDExtensions must be statically linked, not dynamically loaded — the
+; artifact here is a .a built for device (arm64) only, cross-compiled in CI
+; with no on-device/simulator run wired up (matching Game-Framework Core's
+; own documented iOS CI scope). Wiring this into an actual iOS export
+; additionally requires Godot's iOS export static-library registration step
+; (Project Settings > Export > iOS > "iOS Frameworks"/plugin config) — not
+; done yet, this only proves the code cross-compiles cleanly.
+ios.debug.arm64   = "res://addons/FoundationGameFramework/bin/libFoundationGameFramework.ios.debug.arm64.a"
+ios.release.arm64 = "res://addons/FoundationGameFramework/bin/libFoundationGameFramework.ios.release.arm64.a"

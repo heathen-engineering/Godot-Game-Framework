@@ -19,6 +19,8 @@
 #include "SubsystemManagerBridge.h"
 #include "editor/SubsystemsDock.h"
 
+#include <gameframework/SubsystemManager.h>
+
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/core/class_db.hpp>
 
@@ -49,6 +51,21 @@ void uninitialize_foundation_gameframework_module(ModuleInitializationLevel p_le
 {
     if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE)
         return;
+
+    // release_all(), not shutdown() — must actually DESTROY every registered
+    // Subsystem instance here, not just deinitialize it. Every instance's concrete
+    // type (and vtable) lives inside whichever GDExtension .so registered it —
+    // GameplayTags/Lexicon/Ogham/etc, not this one. Godot calls every extension's
+    // uninitialize callback while all extensions are still loaded, THEN dlcloses
+    // them; raw process exit() (when SubsystemManager's own destructor would
+    // otherwise destroy its leftover entries_) happens well after that unloading.
+    // Destroying a Subsystem — a virtual call, ~Subsystem() — through a vtable
+    // whose owning .so has already been dlclose'd is a segfault, not just
+    // theoretical UB: confirmed twice with gdb, first in do_deinitialize() (fixed
+    // by calling shutdown() here), then in ~Entry()'s implicit unique_ptr<Subsystem>
+    // destruction (fixed by this release_all() call actually clearing entries_ here
+    // instead of leaving them for ~SubsystemManager() to find already-unloaded).
+    gameframework::SubsystemManager::instance().release_all();
 
     if (subsystem_manager_bridge_singleton == nullptr)
         return;
