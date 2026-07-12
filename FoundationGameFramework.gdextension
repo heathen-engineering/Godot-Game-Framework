@@ -1,0 +1,14 @@
+[configuration]
+entry_symbol = "foundation_gameframework_init"
+compatibility_minimum = 4.6
+
+[libraries]
+
+windows.debug.x86_64   = "res://addons/FoundationGameFramework/bin/libFoundationGameFramework.windows.debug.x86_64.dll"
+windows.release.x86_64 = "res://addons/FoundationGameFramework/bin/libFoundationGameFramework.windows.release.x86_64.dll"
+
+linux.debug.x86_64   = "res://addons/FoundationGameFramework/bin/libFoundationGameFramework.linux.debug.x86_64.so"
+linux.release.x86_64 = "res://addons/FoundationGameFramework/bin/libFoundationGameFramework.linux.release.x86_64.so"
+
+macos.debug.x86_64   = "res://addons/FoundationGameFramework/bin/libFoundationGameFramework.macos.debug.x86_64.dylib"
+macos.release.x86_64 = "res://addons/FoundationGameFramework/bin/libFoundationGameFramework.macos.release.x86_64.dylib"
