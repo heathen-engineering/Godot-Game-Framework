@@ -17,13 +17,17 @@
 
 #pragma once
 
+#include <godot_cpp/classes/control.hpp>
 #include <godot_cpp/classes/object.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 using namespace godot;
+
+class SubsystemTicker;
 
 /// <summary>
 /// The single point of contact between Godot and Game Framework's
@@ -48,6 +52,46 @@ class SubsystemManagerBridge : public Object
 
 private:
     static SubsystemManagerBridge *singleton_;
+    SubsystemTicker *ticker_ = nullptr;
+    /// subsystem name -> zero-argument Callable returning a fresh Control.
+    /// A Dictionary, not a std::unordered_map, since Variant already holds
+    /// Callable natively — no extra plumbing needed to bridge C++ and
+    /// GDScript-provided callables through this.
+    Dictionary settings_panel_providers_;
+    /// subsystem name -> zero-argument Callable that opens/focuses that
+    /// subsystem's tool window (an EditorDock, e.g. Ogham's node-graph
+    /// editor). Same rationale as settings_panel_providers_ — the bridge
+    /// never needs to know what kind of window it is, only that calling the
+    /// Callable makes it visible.
+    Dictionary tool_window_openers_;
+    /// subsystem name -> one-argument Callable(int mode) that persists a
+    /// new StartMode (0=Disabled, 1=OnDemand, 2=Automatic) somewhere that
+    /// subsystem's own C++ start_mode() override reads back from — e.g.
+    /// SteamworksSubsystem reading a ProjectSettings entry. Presence of an
+    /// entry here (not a separate bool flag) is what the Subsystems tab
+    /// uses to decide "show an editable dropdown for this row" vs. "show a
+    /// plain read-only label" — same has_X()-presence idiom as
+    /// settings_panel_providers_/tool_window_openers_ above. Subsystems
+    /// that never override start_mode() away from the Automatic default
+    /// (Ogham/Lexicon/GameplayTags today) simply never register one.
+    Dictionary start_mode_setters_;
+    /// subsystem name -> zero-argument Callable returning an int build
+    /// status (0=Good/green, 1=NeedsAttention/yellow, 2=Error/red) — the
+    /// optional "Build" concept (ported from Unity-Game-Framework's
+    /// ISettingsGenerator/BuildStatus), e.g. Steamworks' generated
+    /// SteamGame.gd going stale against the current settings. Re-invoked
+    /// on every get_build_status() call (not cached) so the colour is
+    /// always current, not just whatever it was when the row was built.
+    Dictionary build_status_providers_;
+    /// subsystem name -> zero-argument Callable invoked when the user
+    /// clicks that subsystem's build-status button.
+    Dictionary build_actions_;
+
+    /// Idempotent. Creates the SubsystemTicker Node under the scene tree's
+    /// root the first time boot() runs — deferred via call_deferred if the
+    /// scene tree doesn't exist yet (see .cpp for why that's a real case,
+    /// not a defensive-only guard).
+    void _ensure_ticker();
 
 public:
     SubsystemManagerBridge();
@@ -56,7 +100,9 @@ public:
     static SubsystemManagerBridge *get_singleton();
 
     /// Boots every registered Global subsystem (dependency-ordered), then
-    /// creates the default World if none exists yet. Idempotent.
+    /// creates the default World if none exists yet. Idempotent. Always
+    /// synchronous — callers get an accurate global_subsystem_count() etc.
+    /// immediately after this returns.
     void boot();
     /// Tears down every Global subsystem (and, transitively via
     /// WorldManagerSubsystem, every World) in reverse order.
@@ -76,6 +122,59 @@ public:
     PackedStringArray get_global_subsystem_health_issues(int index) const;
     /// (label, value) pairs as a flat Dictionary.
     Dictionary get_global_subsystem_debug_info(int index) const;
+    /// 0=Disabled, 1=OnDemand, 2=Automatic — the subsystem's CURRENT
+    /// effective start_mode(), whatever that C++ override returns right
+    /// now (default Automatic, or a persisted value it already read back).
+    int get_global_subsystem_start_mode(int index) const;
+    /// Manually initializes a StartMode::OnDemand subsystem boot() left
+    /// uninitialized — the dock-facing counterpart to a dev calling e.g.
+    /// SteamApi::InitialiseClient() themselves. False if index is invalid
+    /// or it's already initialised.
+    bool initialize_global_subsystem(int index);
+
+    /// Hands this subsystem's settings-page UI to the unified Subsystems
+    /// Project Settings tab (owned by this addon's own EditorPlugin — see
+    /// its README, "Settings-panel handoff"). provider is a zero-argument
+    /// Callable that returns a fresh Control when invoked; the bridge never
+    /// inspects what's inside, so each gem's settings content stays built
+    /// from that gem's own native types, no cross-gem C++ coupling. Called
+    /// from a gem's own EditorPlugin, after its gate (if any) has unlocked.
+    void register_settings_panel(const String &subsystem_name, const Callable &provider);
+    bool has_settings_panel(const String &subsystem_name) const;
+    /// Invokes the registered provider and returns its result. Null if
+    /// nothing is registered for subsystem_name, or if the provider didn't
+    /// return a Control.
+    Control *get_settings_panel(const String &subsystem_name) const;
+
+    /// Registers a subsystem's "open tool window" callable — e.g. Ogham's
+    /// node-graph EditorDock. This is deliberately "a" place to open the
+    /// window (the Subsystems settings tab wires a button to it), not the
+    /// only one — the dock itself is still reachable through Godot's normal
+    /// dock UI regardless of whether this is ever registered/called.
+    void register_tool_window_opener(const String &subsystem_name, const Callable &opener);
+    bool has_tool_window(const String &subsystem_name) const;
+    /// No-op if nothing is registered for subsystem_name.
+    void open_tool_window(const String &subsystem_name) const;
+
+    /// Registers a subsystem's start-mode setter — see start_mode_setters_
+    /// doc comment above. Called from a gem's own EditorPlugin, same
+    /// pattern/timing as register_settings_panel().
+    void register_start_mode_setter(const String &subsystem_name, const Callable &setter);
+    bool has_start_mode_setter(const String &subsystem_name) const;
+    /// No-op if nothing is registered for subsystem_name (i.e. this
+    /// subsystem's start mode isn't user-configurable).
+    void set_global_subsystem_start_mode(const String &subsystem_name, int mode) const;
+
+    /// Registers a subsystem's optional "Build" concept — see
+    /// build_status_providers_/build_actions_ doc comments above.
+    void register_build(const String &subsystem_name, const Callable &status_provider, const Callable &build_action);
+    bool has_build(const String &subsystem_name) const;
+    /// Re-invokes the registered status_provider every call. 0 (Good) if
+    /// nothing is registered for subsystem_name — has_build() is what the
+    /// tab checks before deciding whether to show the button at all.
+    int get_build_status(const String &subsystem_name) const;
+    /// No-op if nothing is registered for subsystem_name.
+    void trigger_build(const String &subsystem_name) const;
 
 protected:
     static void _bind_methods();

@@ -1,26 +1,39 @@
 @tool
 extends EditorPlugin
 
-## Activates the Game Framework editor tooling: the Subsystems dock. This is
-## the one file in the whole addon that HAS to be GDScript — Godot's
-## plugin.cfg "script=" field only accepts a .gd path, not a C++ class (a
-## hard platform constraint, not a style choice). Everything it does is a
-## single .new() + dock registration; every other class it references
-## (SubsystemsDock) is a C++ GDCLASS resolved transparently by name.
+## Activates the Game Framework editor tooling: the unified "Subsystems"
+## Project Settings tab. This is the one file in the whole addon that HAS to
+## be GDScript — Godot's plugin.cfg "script=" field only accepts a .gd path,
+## not a C++ class (a hard platform constraint, not a style choice).
+## Everything it does is a single .new() + container registration; every
+## other class it references (SubsystemsSettingsTab) is a C++ GDCLASS
+## resolved transparently by name.
+##
+## Deliberately the ONLY place in the whole framework that calls
+## add_control_to_container(CONTAINER_PROJECT_SETTING_TAB_LEFT/RIGHT, ...) —
+## confirmed (via godotengine/godot#98210) that this adds a genuine new
+## top-level Project Settings tab per call, with no automatic merging across
+## plugins the way Unity's SettingsProvider tree has. If every gem called
+## this independently, Project Settings would end up with a separate
+## "GameplayTags"/"Lexicon"/"Ogham"/"Steamworks" tab each, not one unified
+## "Subsystems" tab — exactly the scattered layout this whole pass exists to
+## fix. Every other gem hands its settings UI to THIS tab instead (see
+## SubsystemManagerBridge::register_settings_panel()).
 
-var _dock: SubsystemsDock
+var _tab: SubsystemsSettingsTab
 var _dependency_dialog: AcceptDialog
 
 func _enter_tree() -> void:
-	_dock = SubsystemsDock.new()
-	add_control_to_bottom_panel(_dock, "Subsystems")
+	_tab = SubsystemsSettingsTab.new()
+	add_control_to_container(CONTAINER_PROJECT_SETTING_TAB_LEFT, _tab)
 	call_deferred("_check_dependencies")
+	SubsystemAutoloadSetup.ensure_autoload_setup()
 
 func _exit_tree() -> void:
-	if _dock != null:
-		remove_control_from_bottom_panel(_dock)
-		_dock.queue_free()
-		_dock = null
+	if _tab != null:
+		remove_control_from_container(CONTAINER_PROJECT_SETTING_TAB_LEFT, _tab)
+		_tab.queue_free()
+		_tab = null
 	if _dependency_dialog != null:
 		_dependency_dialog.queue_free()
 		_dependency_dialog = null

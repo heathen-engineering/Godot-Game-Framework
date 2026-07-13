@@ -17,7 +17,8 @@
 
 #include "register_types.h"
 #include "SubsystemManagerBridge.h"
-#include "editor/SubsystemsDock.h"
+#include "SubsystemTicker.h"
+#include "editor/SubsystemsSettingsTab.h"
 
 #include <gameframework/SubsystemManager.h>
 
@@ -33,17 +34,38 @@ void initialize_foundation_gameframework_module(ModuleInitializationLevel p_leve
     if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE)
     {
         ClassDB::register_class<SubsystemManagerBridge>();
+        ClassDB::register_class<SubsystemTicker>();
 
         subsystem_manager_bridge_singleton = memnew(SubsystemManagerBridge);
         Engine::get_singleton()->register_singleton("SubsystemManagerBridge", SubsystemManagerBridge::get_singleton());
+
+        // Deliberately NOT auto-booting from module init. Tried it two ways
+        // (boot() straight from here; boot() deferred until the scene tree
+        // exists) and both crashed — the first deterministically (iterating
+        // gameframework::SubsystemManager's list while another still-loading
+        // extension was concurrently registering into it — "scene tree
+        // exists" turned out not to reliably mean "every extension's
+        // SCENE-level init has finished"), the second non-deterministically
+        // (racing against explicit boot() callers — a dock, a test script —
+        // and crashing during scene teardown when the deferred one-shot
+        // fired after quit()). GDExtension module-init has no reliable hook
+        // for "the whole engine has actually finished starting," and
+        // improvising one with call_deferred/signal chains kept finding new
+        // ways to race. Real game startup instead needs a project autoload
+        // (see editor/SubsystemBootAutoload.gd, registered into
+        // project.godot by editor/SubsystemAutoloadSetup.gd — same
+        // precedent as FoundationSteamworks' own SteamAutoloadSetup.gd) —
+        // Godot's autoload mechanism has no such ambiguity, it's guaranteed
+        // to run once the scene tree is genuinely ready, no invented
+        // plumbing needed.
     }
     else if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR)
     {
         // Editor-only — Godot never initializes MODULE_INITIALIZATION_LEVEL_EDITOR
-        // in exported game builds, so the dock stays entirely out of shipped
+        // in exported game builds, so the tab stays entirely out of shipped
         // games automatically, same pattern as every other gem's editor
         // tooling in this project.
-        ClassDB::register_class<SubsystemsDock>();
+        ClassDB::register_class<SubsystemsSettingsTab>();
     }
 }
 
