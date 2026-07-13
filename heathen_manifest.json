@@ -1,8 +1,0 @@
-{
-    "id": "FoundationGameFramework",
-    "display_name": "Foundation for Game Framework",
-    "version": "1.0.0",
-    "repo": "heathen-engineering/Godot-Game-Framework",
-    "release_asset_pattern": "FoundationGameFramework-{version}.zip",
-    "dependencies": []
-}

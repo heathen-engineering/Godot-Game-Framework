@@ -1,0 +1,13 @@
+{
+    "schema_version": 1,
+    "id": "FoundationGameFramework",
+    "display_name": "Foundation for Game Framework",
+    "version": "1.0.0",
+    "repository_url": "https://github.com/heathen-engineering/Godot-Game-Framework",
+    "source": {
+        "type": "github_release",
+        "repo": "heathen-engineering/Godot-Game-Framework"
+    },
+    "gated": false,
+    "dependencies": []
+}

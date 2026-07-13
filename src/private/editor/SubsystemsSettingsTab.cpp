@@ -19,6 +19,8 @@
 
 #include "SubsystemManagerBridge.h"
 
+#include <godot_cpp/classes/editor_interface.hpp>
+#include <godot_cpp/classes/editor_settings.hpp>
 #include <godot_cpp/classes/h_split_container.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/label.hpp>
@@ -42,6 +44,10 @@ constexpr int COL_START_MODE = 2;
 constexpr int BUILD_BUTTON_ID = 1;
 
 const char *START_MODE_CHOICES = "Disabled,On Demand,Automatic";
+
+const char *SETTING_TREE_WIDTH = "subsystems/tree_panel_width";
+const char *SETTING_LAST_SELECTED = "subsystems/last_selected_subsystem";
+constexpr int DEFAULT_TREE_WIDTH = 248;
 
 String start_mode_label(int mode)
 {
@@ -74,48 +80,56 @@ void SubsystemsSettingsTab::_ensure_built()
     set_v_size_flags(Control::SIZE_EXPAND_FILL);
     connect("visibility_changed", callable_mp(this, &SubsystemsSettingsTab::_on_visibility_changed));
 
-    HSplitContainer *split = memnew(HSplitContainer);
-    split->set_v_size_flags(Control::SIZE_EXPAND_FILL);
-    split->set_h_size_flags(Control::SIZE_EXPAND_FILL);
-    add_child(split);
+    split_ = memnew(HSplitContainer);
+    split_->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+    split_->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+    split_->connect("dragged", callable_mp(this, &SubsystemsSettingsTab::_on_split_dragged));
+    add_child(split_);
 
     tree_ = memnew(Tree);
     tree_->set_hide_root(true);
-    // Both EXPAND_FILL — an earlier version only set the vertical flag, so
-    // HSplitContainer gave the Tree only its minimum width and handed
-    // literally everything else to detail_container_, cramming the whole
-    // list into the top-left corner with a huge dead space to the right.
-    tree_->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+    // Horizontal is deliberately SIZE_FILL, not EXPAND_FILL: with only
+    // detail_container_ set to EXPAND, HSplitContainer gives the Tree
+    // exactly its minimum width and hands every remaining pixel to the
+    // detail pane, with the divider landing right after it — no
+    // split_offset needed. (An HSplitContainer's split_offset is measured
+    // from the container's auto-computed *center*, not its left edge, which
+    // is why an earlier attempt at a fixed offset put the divider past the
+    // middle of the whole dialog instead of near the Tree's minimum width.)
+    // Vertical stays EXPAND_FILL so the Tree still fills the tab's height.
+    tree_->set_h_size_flags(Control::SIZE_FILL);
     tree_->set_v_size_flags(Control::SIZE_EXPAND_FILL);
-    tree_->set_custom_minimum_size(Vector2(320, 0));
+    // Sized to the sum of the column minimums below (28 + 110 + 90) plus a
+    // little slack for the Tree's own borders/scrollbar — was a flat 320,
+    // wider than the columns actually need and left the list dominating the
+    // split. COL_NAME still has set_column_expand(true) so longer subsystem
+    // names aren't clipped, but the panel no longer opens wider than that.
+    // If the user has dragged the divider before, restore that width
+    // instead of the default — see _on_split_dragged().
+    int saved_width = int(_get_editor_setting(SETTING_TREE_WIDTH, DEFAULT_TREE_WIDTH));
+    tree_->set_custom_minimum_size(Vector2(saved_width > 0 ? saved_width : DEFAULT_TREE_WIDTH, 0));
     tree_->set_columns(3);
     tree_->set_column_titles_visible(false);
     tree_->set_column_expand(COL_BUILD, false);
     tree_->set_column_custom_minimum_width(COL_BUILD, 28);
     tree_->set_column_expand(COL_NAME, true);
-    tree_->set_column_custom_minimum_width(COL_NAME, 120);
+    tree_->set_column_custom_minimum_width(COL_NAME, 110);
     tree_->set_column_expand(COL_START_MODE, false);
-    tree_->set_column_custom_minimum_width(COL_START_MODE, 110);
+    tree_->set_column_custom_minimum_width(COL_START_MODE, 90);
     tree_->connect("item_selected", callable_mp(this, &SubsystemsSettingsTab::_on_item_selected));
     tree_->connect("item_edited", callable_mp(this, &SubsystemsSettingsTab::_on_item_edited));
     tree_->connect("button_clicked", callable_mp(this, &SubsystemsSettingsTab::_on_button_clicked));
-    split->add_child(tree_);
+    split_->add_child(tree_);
 
     detail_container_ = memnew(Control);
     detail_container_->set_h_size_flags(Control::SIZE_EXPAND_FILL);
     detail_container_->set_v_size_flags(Control::SIZE_EXPAND_FILL);
-    split->add_child(detail_container_);
+    split_->add_child(detail_container_);
 
     Label *hint = memnew(Label);
     hint->set_text("Select a subsystem on the left to view its settings.");
     hint->set_anchors_preset(Control::PRESET_CENTER);
     detail_container_->add_child(hint);
-
-    // HSplitContainer splits by absolute pixel offset from the left edge,
-    // not a ratio — without this it defaults to 0, which (combined with
-    // both children now correctly requesting EXPAND_FILL) let the split
-    // collapse back to detail_container_ taking nearly everything again.
-    split->set_split_offset(340);
 
     refresh();
 }
@@ -144,12 +158,19 @@ void SubsystemsSettingsTab::_rebuild_list()
 
     // Selection doesn't survive tree_->clear() — TreeItem instances are
     // freed with it — so remember which subsystem was selected by name and
-    // re-select the matching new row once the list is rebuilt.
+    // re-select the matching new row once the list is rebuilt. Falls back
+    // to the last selection from a previous editor session (EditorSettings)
+    // when there's no in-session selection yet — i.e. the very first
+    // _rebuild_list() call after opening Project Settings.
     TreeItem *previously_selected = tree_->get_selected();
-    String reselect_name = previously_selected != nullptr ? previously_selected->get_text(COL_NAME) : String();
+    String reselect_name = previously_selected != nullptr
+        ? previously_selected->get_text(COL_NAME)
+        : String(_get_editor_setting(SETTING_LAST_SELECTED, String()));
 
     tree_->clear();
     TreeItem *root = tree_->create_item();
+    TreeItem *to_select = nullptr;
+    TreeItem *first_item = nullptr;
 
     int count = bridge->get_global_subsystem_count();
     for (int i = 0; i < count; i++)
@@ -196,8 +217,27 @@ void SubsystemsSettingsTab::_rebuild_list()
             item->set_text(COL_START_MODE, start_mode_label(mode));
         }
 
+        if (first_item == nullptr)
+            first_item = item;
         if (name == reselect_name)
-            item->select(COL_NAME);
+            to_select = item;
+    }
+
+    // Nothing matched (first-ever run, or the remembered subsystem is gone)
+    // — default to the top row rather than leaving the detail pane blank.
+    if (to_select == nullptr)
+        to_select = first_item;
+
+    if (to_select != nullptr)
+    {
+        to_select->select(COL_NAME);
+        // TreeItem::select() doesn't emit "item_selected" (that signal is
+        // reserved for user interaction), so the detail pane needs an
+        // explicit push here too — otherwise a first-ever open would select
+        // the top row visually but still show the "select a subsystem"
+        // placeholder.
+        _show_panel_for(to_select->get_text(COL_NAME));
+        _set_editor_setting(SETTING_LAST_SELECTED, to_select->get_text(COL_NAME));
     }
 }
 
@@ -207,6 +247,7 @@ void SubsystemsSettingsTab::_on_item_selected()
     if (selected == nullptr)
         return;
     _show_panel_for(selected->get_text(COL_NAME));
+    _set_editor_setting(SETTING_LAST_SELECTED, selected->get_text(COL_NAME));
 }
 
 void SubsystemsSettingsTab::_on_item_edited()
@@ -239,6 +280,42 @@ void SubsystemsSettingsTab::_on_button_clicked(Object *item, int column, int id,
 
     bridge->trigger_build(tree_item->get_text(COL_NAME));
     _rebuild_list();
+}
+
+void SubsystemsSettingsTab::_on_split_dragged(int offset)
+{
+    (void)offset;
+    // Deliberately not persisting the raw "offset" the signal hands us —
+    // HSplitContainer's own split_offset is measured from the container's
+    // auto-computed center, not a pixel width, which is exactly the
+    // confusion that caused the "extremely wide on reopen" bug this feature
+    // is built on top of. tree_'s actual on-screen width after the drag has
+    // already settled by the time this signal fires, so read that directly
+    // and persist it as the same custom_minimum_size value _ensure_built()
+    // knows how to apply — no offset math to get wrong a second time.
+    _set_editor_setting(SETTING_TREE_WIDTH, int(tree_->get_size().x));
+}
+
+Variant SubsystemsSettingsTab::_get_editor_setting(const String &key, const Variant &default_value)
+{
+    EditorInterface *interface_ = EditorInterface::get_singleton();
+    if (interface_ == nullptr)
+        return default_value;
+    Ref<EditorSettings> settings = interface_->get_editor_settings();
+    if (settings.is_null() || !settings->has_setting(key))
+        return default_value;
+    return settings->get_setting(key);
+}
+
+void SubsystemsSettingsTab::_set_editor_setting(const String &key, const Variant &value)
+{
+    EditorInterface *interface_ = EditorInterface::get_singleton();
+    if (interface_ == nullptr)
+        return;
+    Ref<EditorSettings> settings = interface_->get_editor_settings();
+    if (settings.is_null())
+        return;
+    settings->set_setting(key, value);
 }
 
 Ref<ImageTexture> SubsystemsSettingsTab::_status_icon(const Color &color)
