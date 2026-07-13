@@ -197,7 +197,7 @@ jobs:
           cp -r editor package/addons/FoundationGameFramework/
           cp plugin.cfg package/addons/FoundationGameFramework/
           cp FoundationGameFramework.gdextension package/addons/FoundationGameFramework/
-          cp heathen_manifest.json package/addons/FoundationGameFramework/
+          cp extension.manifest.json package/addons/FoundationGameFramework/
           mkdir -p package/addons/FoundationGameFramework/bin
           cp artifacts/* package/addons/FoundationGameFramework/bin/
           cp README.md package/addons/FoundationGameFramework/

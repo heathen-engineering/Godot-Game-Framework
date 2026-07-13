@@ -136,27 +136,18 @@ installs `FoundationGameplayTags` without `FoundationGameFramework` present, the
 otherwise just fail to load — `Can't open shared object file` for `libgameframework.*`, a confusing
 error pointing at a file the user has never heard of, from an addon they never installed on purpose.
 
-This addon closes that gap itself, since (per the linking model above) every `Subsystem`-registering
-gem already depends on it: a `heathen_manifest.json` at each gem's addon root declares its
-dependencies —
-
-```json
-{
-    "id": "FoundationGameplayTags",
-    "repo": "heathen-engineering/Godot-GameplayTags-Foundation",
-    "dependencies": [
-        { "id": "FoundationGameFramework", "repo": "heathen-engineering/Godot-Game-Framework",
-          "release_asset_pattern": "FoundationGameFramework-{version}.zip" }
-    ]
-}
-```
-
-— and this addon's editor plugin (`FoundationGameFrameworkEditorPlugin.gd`, via
-`HeathenDependencyManifest`/`HeathenDependencyFetcher`) scans every installed addon's manifest on
-activation, and if anything declared is missing, shows a dialog offering to fetch it from its
-GitHub release — **always a confirm dialog, never silent, never automatic**. This is the closest
-Godot-side equivalent to what UPM gives Unity for free; see `editor/dependency_manifest.gd` and
-`editor/dependency_fetcher.gd` for the mechanism.
+This gap is closed by a separate, standalone tool — **[Extension Resolver for
+Godot](https://github.com/heathen-engineering/Godot-Extension-Resolver)** — not by this addon
+itself. Every `Subsystem`-registering gem, this one included, ships an `extension.manifest.json`
+at its addon root declaring its dependencies and where to fetch them from; Extension Resolver
+reads those, checks real version constraints (not just presence), and — **always via a confirm
+dialog, never silent, never automatic** — offers to fetch anything missing or out of range. This
+addon's own gate (`gate/extension_resolver_gate.gd`, present in every gem that depends on this
+one) is the thin per-addon integration point: "is Extension Resolver installed? If not, fetch
+just that; then hand off dependency resolution to it." See that tool's own
+`docs/manifest-schema.md` for the manifest format, and its README for why the resolution logic
+lives in one shared, generic tool instead of duplicated per gem the way earlier versions of this
+addon (`HeathenDependencyManifest`/`HeathenDependencyFetcher`, since removed) did it.
 
 ## Contents
 
