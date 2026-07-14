@@ -49,19 +49,10 @@ const char *SETTING_TREE_WIDTH = "subsystems/tree_panel_width";
 const char *SETTING_LAST_SELECTED = "subsystems/last_selected_subsystem";
 constexpr int DEFAULT_TREE_WIDTH = 248;
 
-String start_mode_label(int mode)
-{
-    switch (mode)
-    {
-        case 0: return "Disabled";
-        case 1: return "On Demand";
-        default: return "Automatic";
-    }
-}
-
 const char *START_MODE_TOOLTIP =
-    "Disabled: never initializes.\nOn Demand: only initializes when explicitly requested "
-    "by code.\nAutomatic: initializes at boot (default).";
+    ">> = Automatic, Initialise at boot\n"
+    "> = On Demand, Initialise when requested from script\n"
+    "[] = Disabled, cannot be Initialised";
 
 // ── Status/StartMode glyphs ─────────────────────────────────────────────
 // Small solid-color glyph bitmaps generated procedurally (not hand-authored
@@ -311,7 +302,6 @@ void SubsystemsSettingsTab::_rebuild_list()
         // all. See _on_button_clicked() for the cycling logic.
         int mode = bridge->get_global_subsystem_start_mode(i);
         bool editable = bridge->has_start_mode_setter(name);
-        item->set_text(COL_START_MODE, start_mode_label(mode));
         String tooltip = String(START_MODE_TOOLTIP) + (editable ? "\n\nClick to change — takes effect next time the project loads." : "");
         item->add_button(COL_START_MODE, _start_mode_icon(mode, editable), START_MODE_BUTTON_ID, !editable, tooltip);
 
