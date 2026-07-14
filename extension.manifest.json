@@ -1,9 +1,17 @@
 {
-    "schema_version": 1,
+    "schema_version": 2,
     "id": "FoundationGameFramework",
     "display_name": "Foundation for Game Framework",
     "version": "1.0.0",
     "repository_url": "https://github.com/heathen-engineering/Godot-Game-Framework",
+    "documentation_url": "https://github.com/heathen-engineering/Godot-Game-Framework#readme",
+    "support_url": "https://github.com/heathen-engineering/Godot-Game-Framework/issues",
+    "license_url": "https://github.com/heathen-engineering/Godot-Game-Framework/blob/main/LICENSE",
+    "publisher": {
+        "name": "Heathen Engineering Limited",
+        "url": "https://heathen.group"
+    },
+    "description": "The engine-agnostic Subsystem/World/GameMode runtime every other Foundation gem builds on, plus the Subsystems Project Settings tab and Extension Resolver integration.",
     "source": {
         "type": "github_release",
         "repo": "heathen-engineering/Godot-Game-Framework"

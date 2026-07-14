@@ -20,6 +20,7 @@
 #include <godot_cpp/classes/control.hpp>
 #include <godot_cpp/classes/h_split_container.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
+#include <godot_cpp/classes/panel_container.hpp>
 #include <godot_cpp/classes/tree.hpp>
 #include <godot_cpp/classes/tree_item.hpp>
 #include <godot_cpp/classes/v_box_container.hpp>
@@ -51,6 +52,12 @@ class SubsystemsSettingsTab : public VBoxContainer
 
 private:
     HSplitContainer *split_ = nullptr;
+    /// Wraps tree_ so a StyleBoxFlat border/background can be applied — a
+    /// plain Tree has no border of its own, so the left/right divide used
+    /// to be visible only via the thin HSplitContainer drag handle. This is
+    /// also now the control that owns custom_minimum_size/persisted width
+    /// (see _on_split_dragged), not tree_ directly.
+    PanelContainer *tree_panel_ = nullptr;
     Tree *tree_ = nullptr;
     Control *detail_container_ = nullptr;
     /// subsystem name -> built Control, cached lazily so switching away from
@@ -63,14 +70,25 @@ private:
     void _rebuild_list();
     void _on_item_selected();
     void _show_panel_for(const String &subsystem_name);
-    void _on_item_edited();
     void _on_button_clicked(Object *item, int column, int id, int mouse_button_index);
     /// Persists the divider's actual pixel position (tree_'s resulting
     /// width, not the raw HSplitContainer offset — see the .cpp for why)
     /// so it survives closing/reopening Project Settings and editor
     /// restarts.
     void _on_split_dragged(int offset);
-    static Ref<ImageTexture> _status_icon(const Color &color);
+    /// ok=true -> checkmark glyph; ok=false -> warning-triangle glyph
+    /// (hard_error picks red over amber). Replaces the old flat-color-square
+    /// icon — same generated-ImageTexture mechanism (TreeItem::add_button()
+    /// renders it correctly; this project's Button.icon does not), just a
+    /// hand-plotted/procedural shape instead of a solid fill, so status
+    /// reads without relying on color alone (colorblind-friendly).
+    static Ref<ImageTexture> _status_icon(bool ok, bool hard_error = false);
+    /// mode: 0=Disabled (stop square), 1=On Demand (play triangle),
+    /// 2=Automatic (fast-forward double-triangle). editable=false renders a
+    /// dim/gray glyph for the ~most rows where StartMode can't be changed;
+    /// editable=true colors it (red/blue/green) since it's now an
+    /// interactive click-to-cycle button, not a dropdown.
+    static Ref<ImageTexture> _start_mode_icon(int mode, bool editable);
     /// EditorSettings-backed (per-user editor state, not project data —
     /// this is UI layout memory, the same category as e.g. which dock tabs
     /// were open, not something that belongs committed to the project).
